@@ -30,7 +30,6 @@
 #include "crashdump.h"
 #include "macro.h"
 #include "ff7.h"
-#include "ff7/defs.h"
 #include "ff8.h"
 #include "patch.h"
 #include "gl.h"
@@ -41,12 +40,10 @@
 #include "gamepad.h"
 #include "input.h"
 #include "field.h"
-
+#include "gamehacks.h"
 #include "discohash.h"
 
 bool proxyWndProc = false;
-
-double speedhack_current = 1;
 
 // global game window handler
 HWND gameHwnd;
@@ -300,24 +297,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
 	if (proxyWndProc)
 	{
-		if (uMsg == WM_KEYDOWN)
+		switch (uMsg)
 		{
-			if (!ff8)
-			{
-				if (wParam == 'R' && (::GetKeyState(VK_CONTROL) & 0x8000) != 0) ff7_do_reset = true;
-			}
-
-			if (wParam == VK_UP && (::GetKeyState(VK_CONTROL) & 0x8000) != 0) speedhack_incr();
-			else if (wParam == VK_DOWN && (::GetKeyState(VK_CONTROL) & 0x8000) != 0) speedhack_decr();
-		}
-		else if (uMsg == WM_SIZE)
-		{
+		case WM_SIZE:
 			window_size_x = (long)LOWORD(lParam);
 			window_size_y = (long)HIWORD(lParam);
 			newRenderer.reset();
-		}
-		else if (uMsg == WM_MENUCHAR)
-		{
+			break;
+		case WM_MENUCHAR:
 			if (LOWORD(wParam) == VK_RETURN)
 			{
 				CURSORINFO cursor{ sizeof(CURSORINFO) };
@@ -355,9 +342,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
 				return MAKELRESULT(0, MNC_CLOSE);
 			}
-		}
-		else if (uMsg == WM_QUIT)
-		{
+			break;
+		case WM_QUIT:
 			if (steam_edition) {
 				metadataPatcher.apply();
 
@@ -387,34 +373,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			SetWindowLongA(gameHwnd, GWL_WNDPROC, (LONG)common_externals.engine_wndproc);
 
 			unreplace_functions();
+			break;
 		}
 
 		HandleInputEvents(uMsg, wParam, lParam);
 	}
 
+	gamehacks.process(uMsg, wParam, lParam);
+
 	return common_externals.engine_wndproc(hwnd, uMsg, wParam, lParam);
-}
-
-// SPEEDHACK
-void speedhack_incr()
-{
-	if (speedhack_current == speedhack_max) speedhack_current = 1;
-	else speedhack_current += speedhack_step;
-
-	show_popup_msg(TEXTCOLOR_LIGHT_BLUE, "Current Speedhack: %2.1lfx", speedhack_current);
-}
-
-void speedhack_decr()
-{
-	if (speedhack_current == 1.0) speedhack_current = speedhack_max;
-	else speedhack_current -= speedhack_step;
-
-	show_popup_msg(TEXTCOLOR_LIGHT_BLUE, "Current Speedhack: %2.1lfx", speedhack_current);
-}
-
-void speedhack_reset()
-{
-	speedhack_current = 1;
 }
 
 int common_create_window(HINSTANCE hInstance, struct game_obj* game_object)
@@ -598,6 +565,8 @@ uint32_t common_init(struct game_obj *game_object)
 	texture_format = common_externals.create_texture_format();
 	common_externals.make_pixelformat(32, 0xFF0000, 0xFF00, 0xFF, 0xFF000000, texture_format);
 	common_externals.add_texture_format(texture_format, game_object);
+
+	gamehacks.init();
 
 	proxyWndProc = true;
 
@@ -841,12 +810,7 @@ void common_flip(struct game_obj *game_object)
 	}
 	else
 	{
-		if (ff7_do_reset)
-		{
-			speedhack_reset();
-
-			ff7_externals.reset_game_obj_sub_5F4971(game_object);
-		}
+		if (ff7_do_reset) ff7_externals.reset_game_obj_sub_5F4971(game_object);
 	}
 }
 
@@ -1956,7 +1920,7 @@ void qpc_get_time(time_t *dest)
 
 int64_t qpc_diff_time(int64_t* t1, int64_t* t2, int64_t* out)
 {
-	int64_t ret = (*t1 - *t2) * speedhack_current;
+	int64_t ret = (*t1 - *t2) * gamehacks.speedhack_getSpeed();
 
 	*out = ret;
 
